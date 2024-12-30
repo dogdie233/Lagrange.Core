@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using Lagrange.Core.Event.EventArg;
-using Lagrange.Core.Internal.Event.Notify;
 
 namespace Lagrange.Core.Event;
 
@@ -42,6 +41,8 @@ public partial class EventInvoker : IDisposable
         RegisterEvent((GroupReactionEvent e) => OnGroupReactionEvent?.Invoke(context, e));
         RegisterEvent((GroupNameChangeEvent e) => OnGroupNameChangeEvent?.Invoke(context, e));
         RegisterEvent((GroupTodoEvent e) => OnGroupTodoEvent?.Invoke(context, e));
+        RegisterEvent((GroupMemberEnterEvent e) => OnGroupMemberEnterEvent?.Invoke(context, e));
+        RegisterEvent((PinChangedEvent e) => OnPinChangedEvent?.Invoke(context, e));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

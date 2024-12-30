@@ -10,7 +10,6 @@ using Lagrange.Core.Internal.Service;
 using Lagrange.Core.Message;
 using Lagrange.Core.Message.Entity;
 using Lagrange.Core.Message.Filter;
-using Lagrange.Core.Utility.Extension;
 using FriendPokeEvent = Lagrange.Core.Event.EventArg.FriendPokeEvent;
 using GroupPokeEvent = Lagrange.Core.Event.EventArg.GroupPokeEvent;
 
@@ -36,10 +35,14 @@ namespace Lagrange.Core.Internal.Context.Logic.Implementation;
 [EventSubscribe(typeof(GroupSysNameChangeEvent))]
 [EventSubscribe(typeof(FriendSysRecallEvent))]
 [EventSubscribe(typeof(FriendSysRequestEvent))]
+[EventSubscribe(typeof(GroupSysMemberEnterEvent))]
 [EventSubscribe(typeof(FriendSysPokeEvent))]
 [EventSubscribe(typeof(LoginNotifyEvent))]
 [EventSubscribe(typeof(MultiMsgDownloadEvent))]
 [EventSubscribe(typeof(GroupSysTodoEvent))]
+[EventSubscribe(typeof(SysPinChangedEvent))]
+[EventSubscribe(typeof(FetchPinsEvent))]
+[EventSubscribe(typeof(SetPinFriendEvent))]
 [BusinessLogic("MessagingLogic", "Manage the receiving and sending of messages and notifications")]
 internal class MessagingLogic : LogicBase
 {
@@ -157,6 +160,12 @@ internal class MessagingLogic : LogicBase
                 Collection.Invoker.PostEvent(requestArgs);
                 break;
             }
+            case GroupSysMemberEnterEvent info:
+            {
+                var @event = new GroupMemberEnterEvent(info.GroupUin, info.GroupMemberUin, info.StyleId);
+                Collection.Invoker.PostEvent(@event);
+                break;
+            }
             case GroupSysMuteEvent groupMute:
             {
                 uint? operatorUin = null;
@@ -244,6 +253,26 @@ internal class MessagingLogic : LogicBase
                 Collection.Invoker.PostEvent(new GroupTodoEvent(todo.GroupUin, uin));
                 break;
             }
+            case SysPinChangedEvent pin:
+            {
+                uint uin = pin.GroupUin ?? await Collection.Business.CachingLogic.ResolveUin(null, pin.Uid) ?? 0;
+
+                Collection.Invoker.PostEvent(new PinChangedEvent(
+                    pin.GroupUin == null ? PinChangedEvent.ChatType.Friend : PinChangedEvent.ChatType.Group,
+                    uin,
+                    pin.IsPin
+                ));
+                break;
+            }
+            case FetchPinsEvent pins:
+            {
+                foreach (var friendUid in pins.FriendUids)
+                {
+                    pins.FriendUins.Add(await Collection.Business.CachingLogic.ResolveUin(null, friendUid) ?? 0);
+                }
+
+                break;
+            }
         }
     }
 
@@ -266,6 +295,13 @@ internal class MessagingLogic : LogicBase
                 await ResolveChainMetadata(send.Chain);
                 await ResolveOutgoingChain(send.Chain);
                 await Collection.Highway.UploadResources(send.Chain);
+                break;
+            }
+            case SetPinFriendEvent pinFriend: // resolve Uin to Uid
+            {
+                pinFriend.Uid = await Collection.Business.CachingLogic.ResolveUid(null, pinFriend.Uin)
+                    ?? throw new Exception();
+
                 break;
             }
         }
@@ -389,7 +425,6 @@ internal class MessagingLogic : LogicBase
                     face.SysFaceEntry ??= await cache.GetCachedFaceEntity(face.FaceId);
                     break;
                 }
-                
                 case ForwardEntity forward when forward.TargetUin != 0:
                 {
                     var cache = Collection.Business.CachingLogic;

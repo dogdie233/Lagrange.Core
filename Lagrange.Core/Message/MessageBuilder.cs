@@ -102,7 +102,7 @@ public sealed class MessageBuilder
     /// </summary>
     /// <param name="id">The id of emoji</param>
     /// <param name="isLarge">Is the emoji large</param>
-    public MessageBuilder Face(ushort id, bool? isLarge = false)
+    public MessageBuilder Face(ushort id, bool isLarge = false)
     {
         var faceEntity = new FaceEntity(id, isLarge);
         _chain.Add(faceEntity);
@@ -162,6 +162,19 @@ public sealed class MessageBuilder
     public MessageBuilder Xml(string xml)
     {
         var xmlEntity = new XmlEntity(xml);
+        _chain.Add(xmlEntity);
+
+        return this;
+    }
+    
+    /// <summary>
+    /// Add a xml entity (with custom serviceId) to the message chain (card message)
+    /// </summary>
+    /// <param name="xml">The xml to be sent</param>
+    /// <param name="serviceId">The service id of the xml</param>
+    public MessageBuilder Xml(string xml, int serviceId)
+    {
+        var xmlEntity = new XmlEntity(xml, serviceId);
         _chain.Add(xmlEntity);
 
         return this;

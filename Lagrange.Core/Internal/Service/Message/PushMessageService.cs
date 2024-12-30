@@ -1,3 +1,4 @@
+using System.Text;
 using Lagrange.Core.Common;
 using Lagrange.Core.Internal.Event;
 using Lagrange.Core.Internal.Event.Message;
@@ -6,7 +7,6 @@ using Lagrange.Core.Internal.Packets.Message;
 using Lagrange.Core.Internal.Packets.Message.Notify;
 using Lagrange.Core.Message;
 using Lagrange.Core.Utility.Binary;
-using Lagrange.Core.Utility.Extension;
 using ProtoBuf;
 
 // ReSharper disable InconsistentNaming
@@ -89,14 +89,23 @@ internal class PushMessageService : BaseService<PushMessageEvent>
             case PkgType.GroupMemberIncreaseNotice when message.Message.Body?.MsgContent is { } content:
             {
                 var increase = Serializer.Deserialize<GroupChange>(content.AsSpan());
-                var increaseEvent = GroupSysIncreaseEvent.Result(increase.GroupUin, increase.MemberUid, increase.OperatorUid, increase.DecreaseType);
+                var increaseEvent = GroupSysIncreaseEvent.Result(increase.GroupUin, increase.MemberUid, Encoding.UTF8.GetString(increase.Operator.AsSpan()), increase.DecreaseType);
                 extraEvents.Add(increaseEvent);
                 break;
             }
             case PkgType.GroupMemberDecreaseNotice when message.Message.Body?.MsgContent is { } content:
             {
                 var decrease = Serializer.Deserialize<GroupChange>(content.AsSpan());
-                var decreaseEvent = GroupSysDecreaseEvent.Result(decrease.GroupUin, decrease.MemberUid, decrease.OperatorUid, decrease.DecreaseType);
+                GroupSysDecreaseEvent decreaseEvent;
+                if (decrease.DecreaseType == 3) // 3 是bot自身被踢出，Operator字段会是一个protobuf
+                {
+                    var op = Serializer.Deserialize<OperatorInfo>(decrease.Operator.AsSpan());
+                    decreaseEvent = GroupSysDecreaseEvent.Result(decrease.GroupUin, decrease.MemberUid, op.Operator.Uid, decrease.DecreaseType);
+                }
+                else
+                {
+                    decreaseEvent = GroupSysDecreaseEvent.Result(decrease.GroupUin, decrease.MemberUid, Encoding.UTF8.GetString(decrease.Operator.AsSpan()), decrease.DecreaseType);
+                }
                 extraEvents.Add(decreaseEvent);
                 break;
             }
@@ -245,17 +254,38 @@ internal class PushMessageService : BaseService<PushMessageEvent>
         var pkgType = (Event0x210SubType)(msg.Message.ContentHead.SubType ?? 0);
         switch (pkgType)
         {
-            case Event0x210SubType.FriendDeleteNotice:
-            {
-                // 0A8D010A4008AFB39FF80A1218755F54305768425A6368695A684555496253786F6F63474128AFB39FF80A3218755F54305768425A6368695A684555496253786F6F634741122108900410271827209092D9C10228F2C00330809096AF06609092D9C182808080021A260A0012220A2008001005721A0A18755F597831586B5A4E4E656E4E3141356A53423361576667
-                break;
-            }
             case Event0x210SubType.FriendRequestNotice when msg.Message.Body?.MsgContent is { } content:
             {
                 if (Serializer.Deserialize<FriendRequest>(content.AsSpan()).Info is { } info)
                 {
                     var friendEvent = FriendSysRequestEvent.Result(msg.Message.ResponseHead.FromUin, info.SourceUid, info.Message, info.Source);
                     extraEvents.Add(friendEvent);
+                }
+                break;
+            }
+            case Event0x210SubType.GroupMemberEnterNotice when msg.Message.Body?.MsgContent is { } content:
+            {
+                var info = Serializer.Deserialize<GroupMemberEnter>(content.AsSpan());
+                if (info is { Body.Info.Detail: { Style: { } style } detail })
+                {
+                    var @event = GroupSysMemberEnterEvent.Result(detail.GroupId, detail.GroupMemberUin, style.StyleId);
+                    extraEvents.Add(@event);
+                }
+                break;
+            }
+            case Event0x210SubType.FriendDeleteOrPinChangedNotice when msg.Message.Body?.MsgContent is { } content: // Stupid TX
+            {
+                var info = Serializer.Deserialize<FriendDeleteOrPinChanged>(content.AsSpan());
+                // if (info.Body.Data.Type == 5 && info.Body.Data.FriendDelete != null) // Friend Delete
+                // 0A8D010A4008AFB39FF80A1218755F54305768425A6368695A684555496253786F6F63474128AFB39FF80A3218755F54305768425A6368695A684555496253786F6F634741122108900410271827209092D9C10228F2C00330809096AF06609092D9C182808080021A260A0012220A2008001005721A0A18755F597831586B5A4E4E656E4E3141356A53423361576667
+                if (info.Body.Type == 7 && info.Body.PinChanged is { } data)
+                {
+                    var @event = SysPinChangedEvent.Result(
+                        data.Body.Uid,
+                        data.Body.GroupUin,
+                        data.Body.Info.Timestamp.Length != 0
+                    );
+                    extraEvents.Add(@event);
                 }
                 break;
             }
@@ -270,6 +300,11 @@ internal class PushMessageService : BaseService<PushMessageEvent>
                     recall.Info.TipInfo.Tip ?? ""
                 );
                 extraEvents.Add(recallEvent);
+                break;
+            }
+            case Event0x210SubType.ServicePinChanged:
+            {
+                // 0A93010A4008E2FBEDF9051218755F667132684B3132624267306F7735637A57685A66726728E2FBEDF9053218755F667132684B3132624267306F7735637A57685A667267122308900410C70118C70120B7E1C1B50528B8CD0330A790E2B90660B7E1C1B585808080021A2A0A0012260A24080010A01F82FA011B08934E10E2FBEDF90518894E2003320B0831CADFEF010467388827180122330A0D33302E3138362E38362E31363410FE9D011A1E10900418B8CD0320B7E1C1B5858080800230C701380140E2FBEDF9054801
                 break;
             }
             case Event0x210SubType.GroupKickNotice when msg.Message.Body?.MsgContent is { } content:
@@ -341,8 +376,10 @@ internal class PushMessageService : BaseService<PushMessageEvent>
     private enum Event0x210SubType
     {
         FriendRequestNotice = 35,
-        FriendDeleteNotice = 39,
+        GroupMemberEnterNotice = 38,
+        FriendDeleteOrPinChangedNotice = 39,
         FriendRecallNotice = 138,
+        ServicePinChanged = 199, // e.g: My computer | QQ Wallet | ...
         FriendPokeNotice = 290,
         GroupKickNotice = 212,
     }
